@@ -99,6 +99,7 @@ class Klondike:
         self.passes = 1          # passes through the stock (1 = the first)
         self.elapsed = 0.0       # seconds, maintained by the UI
         self.started = False     # timer starts at the first action
+        self.winnable = False    # proven winnable by the solver when dealt
         self.history: list[dict] = []
         self._deal()
 
@@ -160,6 +161,7 @@ class Klondike:
             bankroll_start=self.bankroll_start,
             elapsed=self.elapsed,
             started=self.started,
+            winnable=self.winnable,
             history=self.history[-SAVED_UNDO_LIMIT:],
         )
         return data
@@ -175,6 +177,7 @@ class Klondike:
         game.bankroll_start = int(data.get("bankroll_start", 0))
         game.elapsed = float(data.get("elapsed", 0.0))
         game.started = bool(data.get("started", False))
+        game.winnable = bool(data.get("winnable", False))
         game.history = list(data.get("history", []))
         return game
 

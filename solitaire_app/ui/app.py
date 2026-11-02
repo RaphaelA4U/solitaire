@@ -12,6 +12,7 @@ Design rules:
 
 from __future__ import annotations
 
+import math
 import os
 import random
 import sys
@@ -22,6 +23,7 @@ from typing import Optional
 
 from rich.text import Text
 from textual import events, on, work
+from textual.worker import get_current_worker
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Center, Vertical, VerticalScroll
@@ -33,7 +35,11 @@ from textual.widgets import Static
 
 from .. import __version__
 from ..config import (
+    add_pooled_deal,
     bankroll,
+    deal_pool_key,
+    load_deal_pool,
+    take_pooled_deal,
     clear_saved_game,
     load_game_snapshot,
     load_settings,
@@ -52,6 +58,7 @@ from ..game import (
     Klondike,
     Move,
 )
+from ..solver import find_winnable_seed
 from ..update import REPO_DIR, check_and_update
 
 ACCENT = "#875fff"   # Claude-style purple, leaning slightly blue
@@ -74,6 +81,13 @@ LOGO = """\
 CARD_W = 9
 CARD_H = 5
 DOUBLE_CLICK = 0.4  # seconds
+
+# Win fireworks: rockets climb, burst into suit symbols, sparks fall and fade.
+FX_DT = 0.05            # seconds per frame
+FX_DURATION = 7.0       # seconds, unless a key or click skips it
+FX_GRAVITY = 14.0       # cells per second squared
+FX_COLORS = [ACCENT, "red", WINC, HINT, "bold"]
+FX_SYMBOLS = "♠♥♦♣*+."
 
 
 def fmt_time(seconds: float) -> str:
@@ -428,7 +442,7 @@ HELP_TEXT = f"""[b]SOLITAIRE v{__version__}[/b]  [dim]Klondike[/dim]
   [b]d[/b]              draw from the stock
   [b]a[/b]              auto-move the card under the cursor (like double-click)
   [b]f[/b]              send the card under the cursor to its foundation
-  [b]c[/b]              finish the game (once it is a sure win)
+  [b]c[/b]              finish a sure win for you
   [b]u / ctrl+z[/b]     undo (as often as you like)
   [b]h[/b]              hint; press again for the next one
   [b]n[/b]              new deal        [b]r[/b]  restart this deal
@@ -443,8 +457,15 @@ HELP_TEXT = f"""[b]SOLITAIRE v{__version__}[/b]  [dim]Klondike[/dim]
                  Vegas: pay $52 per deal, win $5 per foundation card;
                  one pass through the stock with draw 1, three with draw 3.
                  Vegas (cumulative) keeps your bankroll between deals.
-  [b]Auto-finish[/b]    once every card is face up and the win is certain, the
-                 game finishes itself.
+  [b]Deals[/b]          "winnable only" (default): a solver plays every deal through
+                 before you get it, so each one can be won. "random" deals
+                 anything, the way real cards fall.
+  [b]Win animation[/b]  fireworks when you win; any key or click skips them.
+
+[b u]Sure wins[/b u]
+  Once every card is face up and the win is certain, the game asks whether
+  it should finish for you: [b]enter[/b] yes, [b]esc[/b] keep playing. Changed your
+  mind later? [b]c[/b] finishes it.
 
 [b u]Deals[/b u]
   Every deal has a number (top left). `solitaire --deal 123456` plays that
@@ -501,6 +522,7 @@ def _changelog_summary(version: str, max_lines: int = 6) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 TOP_ROW = ["stock", "waste", None, *FOUNDATIONS]
+POOL_SIZE = 3  # solved deals kept ready per draw/scoring mode
 
 
 class Board(Widget, can_focus=True):
@@ -512,6 +534,9 @@ class Board(Widget, can_focus=True):
             self.index = index
             self.double = double
             super().__init__()
+
+    class SkipFx(Message):
+        """A click during the win fireworks: skip them."""
 
     class Dropped(Message):
         def __init__(self, src: str, index: int, dst: str) -> None:
@@ -533,6 +558,77 @@ class Board(Widget, can_focus=True):
         self._press: Optional[tuple[str, int]] = None
         self._dragging = False
         self._last_click: tuple[float, str, int] = (0.0, "", -1)
+        self.banner: Optional[tuple[str, str]] = None
+        self.particles: list[list] = []  # [x, y, vx, vy, char, style, life, rocket]
+        self._fx_time = 0.0
+        self._fx_next_rocket = 0.0
+        self._fx_rng = random.Random()
+
+    # -- win fireworks ---------------------------------------------------
+    def start_fireworks(self, detail: str) -> None:
+        self.banner = ("Y O U   W O N !", detail)
+        self.particles = []
+        self._fx_time = 0.0
+        self._fx_next_rocket = 0.0
+        self.refresh()
+
+    def stop_fireworks(self) -> None:
+        self.banner = None
+        self.particles = []
+        self.refresh()
+
+    def step_fireworks(self) -> bool:
+        """Advance one frame; False when the show is over."""
+        rng = self._fx_rng
+        w, h = max(self.size.width, 20), max(self.size.height, 10)
+        self._fx_time += FX_DT
+        if self._fx_time < FX_DURATION - 1.5 and self._fx_time >= self._fx_next_rocket:
+            self._fx_next_rocket = self._fx_time + rng.uniform(0.15, 0.45)
+            climb = rng.uniform(0.35, 0.8) * h
+            vy = -(2 * FX_GRAVITY * climb) ** 0.5
+            self.particles.append([rng.uniform(4, w - 4), h - 1, rng.uniform(-3, 3), vy,
+                                   "|", "bold", 9.0, True])
+        alive = []
+        for p in self.particles:
+            p[0] += p[2] * FX_DT
+            p[1] += p[3] * FX_DT
+            p[3] += FX_GRAVITY * FX_DT
+            p[6] -= FX_DT
+            if p[7] and p[3] >= -1.0:
+                # Apex: burst into a ring of suit symbols in one color.
+                color = rng.choice(FX_COLORS)
+                for i in range(rng.randint(14, 22)):
+                    angle = rng.uniform(0, 6.2832)
+                    speed = rng.uniform(5, 12)
+                    alive.append([p[0], p[1], math.cos(angle) * speed * 2, math.sin(angle) * speed - 3,
+                                  rng.choice(FX_SYMBOLS), color, rng.uniform(1.0, 2.0), False])
+                continue
+            if p[6] > 0 and -2 < p[0] < w + 2 and p[1] < h + 1:
+                alive.append(p)
+        self.particles = alive
+        self.refresh()
+        return self._fx_time < FX_DURATION or bool(self.particles) and self._fx_time < FX_DURATION + 2
+
+    def _draw_fireworks(self, cv: "Canvas") -> None:
+        for x, y, _vx, _vy, ch, style, life, rocket in self.particles:
+            if rocket:
+                cv.put(int(x), int(y), ch, style)
+                cv.put(int(x), int(y) + 1, "'", "dim")
+            else:
+                cv.put(int(x), int(y), ch, style if life > 0.45 else f"dim {style}")
+        if self.banner:
+            title, detail = self.banner
+            inner = max(len(title), len(detail)) + 8
+            x = max(0, (cv.w - inner - 2) // 2)
+            y = max(0, (cv.h - 6) // 2)
+            edge = "+" + "-" * inner + "+"
+            cv.put(x, y, edge, f"bold {WINC}")
+            for r, (text, style) in enumerate([("", ""), (title, f"bold {WINC}"),
+                                                (detail, "bold"), ("", "")], start=1):
+                cv.put(x, y + r, "|", f"bold {WINC}")
+                cv.put(x + 1, y + r, f"{text:^{inner}}", style)
+                cv.put(x + inner + 1, y + r, "|", f"bold {WINC}")
+            cv.put(x, y + 5, edge, f"bold {WINC}")
 
     # -- geometry --------------------------------------------------------
     def board_width(self) -> int:
@@ -645,6 +741,8 @@ class Board(Widget, can_focus=True):
                 bottom = base_y + (ys[i + 1] if not top else ys[i] + CARD_H)
                 rects.append((x, base_y + ys[i], x + CARD_W, bottom, pile, i))
         self._rects = rects
+        if self.banner or self.particles:
+            self._draw_fireworks(cv)
         return cv.to_text()
 
     # -- mouse -----------------------------------------------------------
@@ -659,6 +757,10 @@ class Board(Widget, can_focus=True):
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         self.focus()
+        if self.banner is not None:
+            self._press = None
+            self.post_message(self.SkipFx())
+            return
         self._press = self.hit(event.x, event.y)
         self._dragging = False
         self.capture_mouse()
@@ -734,6 +836,12 @@ FOOTER = [
     ("? help", "help"),
     ("esc menu", "menu"),
 ]
+FOOTER_FINISH = [
+    ("enter finish it", "finish"),
+    ("esc keep playing", "decline"),
+    ("u undo", "undo"),
+    ("? help", "help"),
+]
 FOOTER_WON = [
     ("n new deal", "new"),
     ("r replay deal", "restart"),
@@ -764,11 +872,13 @@ class GameScreen(Screen):
         Binding("ctrl+q", "quit_app", show=False),
     ]
 
-    def __init__(self, game: Klondike, auto_finish: bool = True) -> None:
+    def __init__(self, game: Klondike) -> None:
         super().__init__()
         self.game = game
-        self.auto_finish = auto_finish
         self.recorded = False
+        self._offer = False      # the "finish it for you?" question is showing
+        self._declined = False   # ... and the player said no (asked once)
+        self._fx_timer = None
         self._hint_list: list[Move] = []
         self._hint_idx = 0
         self._finishing = False
@@ -796,7 +906,8 @@ class GameScreen(Screen):
                 extra = f"  Bankroll ${g.bankroll_start}, this deal costs $52."
             elif g.scoring == "vegas":
                 extra = "  This deal costs $52; every foundation card pays $5."
-            self.note(f"Deal #{g.seed}. Draw {g.draw}, {SCORING_LABELS[g.scoring].lower()} scoring.{extra}")
+            proof = ", a winnable one" if g.winnable else ""
+            self.note(f"Deal #{g.seed}{proof}. Draw {g.draw}, {SCORING_LABELS[g.scoring].lower()} scoring.{extra}")
         self._refresh_all()
         self._after_action(save=False)
 
@@ -861,7 +972,6 @@ class GameScreen(Screen):
         save_game_snapshot({
             "version": __version__,
             "game": self.game.to_dict(),
-            "auto_finish": self.auto_finish,
         })
 
     def _after_action(self, save: bool = True) -> None:
@@ -887,11 +997,11 @@ class GameScreen(Screen):
             return
         plan = g.autocomplete_plan()
         if plan is not None:
-            if self.auto_finish:
-                self._start_finish()
-            else:
-                self.note(f"[{WINC}]Every card is face up: a sure win.[/] Press [b]c[/b] to finish.")
+            if not self._declined:
+                self._ask_finish()
             return
+        if self._offer:  # undone back to before the sure win
+            self._close_offer()
         if g.started and not g.has_moves():
             self.note("[red]No more moves.[/] [b]u[/b] undo, [b]r[/b] restart this deal, [b]n[/b] new deal.")
 
@@ -911,6 +1021,19 @@ class GameScreen(Screen):
         self.note(f"[bold {WINC}]You won![/] {', '.join(parts)}.")
         self.query_one("#footer-keys", ActionBar).set_segments(FOOTER_WON)
         self._refresh_all()
+        if load_settings().get("win_animation", True) and self._fx_timer is None:
+            self.board.start_fireworks("   ".join(parts))
+            self._fx_timer = self.set_interval(FX_DT, self._fx_step)
+
+    def _fx_step(self) -> None:
+        if not self.board.step_fireworks():
+            self.stop_fireworks()
+
+    def stop_fireworks(self) -> None:
+        if self._fx_timer is not None:
+            self._fx_timer.stop()
+        self._fx_timer = None
+        self.board.stop_fireworks()
 
     def _stats_entry(self, won: bool) -> dict:
         g = self.game
@@ -934,10 +1057,31 @@ class GameScreen(Screen):
                     bankroll_after=g.bankroll if g.scoring == "vegas_cumulative" else None)
         clear_saved_game()
 
-    # -- auto finish -----------------------------------------------------
+    # -- finishing a sure win ---------------------------------------------
+    def _ask_finish(self) -> None:
+        """Inline question, no dialog: finish it for you, or keep playing."""
+        self._offer = True
+        self.board.selection = None
+        self.note(f"[bold {WINC}]Every card is face up: this is a sure win.[/] "
+                  f"Finish it for you? [b]enter[/b] yes, [b]esc[/b] keep playing.")
+        self.query_one("#footer-keys", ActionBar).set_segments(FOOTER_FINISH)
+
+    def _close_offer(self) -> None:
+        self._offer = False
+        self.query_one("#footer-keys", ActionBar).set_segments(FOOTER)
+
+    def action_decline(self) -> None:
+        if not self._offer:
+            return
+        self._declined = True
+        self._close_offer()
+        self.note("Keep going. Press [b]c[/b] when you want it finished after all.")
+
     def _start_finish(self) -> None:
         if self._finishing:
             return
+        if self._offer:
+            self._close_offer()
         self._finishing = True
         self.board.selection = None
         self.note(f"[{WINC}]Sure win, finishing...[/]")
@@ -966,7 +1110,7 @@ class GameScreen(Screen):
 
     # -- actions ---------------------------------------------------------
     def _busy(self) -> bool:
-        return self._finishing
+        return self._finishing or bool(getattr(self.app, "_searching", False))
 
     def _try_move(self, src: str, index: int, dst: str) -> bool:
         g = self.game
@@ -1068,6 +1212,10 @@ class GameScreen(Screen):
             return
         self._activate(pile, index)
 
+    @on(Board.SkipFx)
+    def _skip_fx(self, _: "Board.SkipFx") -> None:
+        self.stop_fireworks()
+
     @on(Board.Dropped)
     def _dropped(self, event: Board.Dropped) -> None:
         if self._busy() or self.game.is_won():
@@ -1083,6 +1231,8 @@ class GameScreen(Screen):
             "hint": self.action_hint,
             "new": self.action_new_deal,
             "restart": self.action_restart,
+            "finish": self.action_finish,
+            "decline": self.action_decline,
             "help": self.action_help,
             "menu": self.action_menu,
             "quit": self.action_quit_app,
@@ -1092,6 +1242,12 @@ class GameScreen(Screen):
 
     # Keyboard ----------------------------------------------------------
     async def on_key(self, event: events.Key) -> None:
+        if self._fx_timer is not None:
+            # Any key skips the celebration (and does nothing else).
+            event.stop()
+            event.prevent_default()
+            self.stop_fireworks()
+            return
         if event.character and event.character in "1234567" and len(event.character) == 1:
             event.stop()
             if self._busy() or self.game.is_won():
@@ -1142,6 +1298,9 @@ class GameScreen(Screen):
 
     def action_select(self) -> None:
         if self._busy() or self.game.is_won():
+            return
+        if self._offer:
+            self._start_finish()
             return
         pile, idx = self.board.cursor
         cards = self.game.piles[pile]
@@ -1258,9 +1417,13 @@ class GameScreen(Screen):
         app = self.app
         assert isinstance(app, SolitaireApp)
         self.abandon()
-        app.new_game(replace=True, seed=self.game.seed, draw=self.game.draw, scoring=self.game.scoring)
+        app.new_game(replace=True, seed=self.game.seed, draw=self.game.draw,
+                     scoring=self.game.scoring, winnable=self.game.winnable)
 
     def action_escape(self) -> None:
+        if self._offer:
+            self.action_decline()
+            return
         if self.board.selection or self.board.hint:
             self.board.selection = None
             self.board.hint = None
@@ -1290,7 +1453,8 @@ MENU_INFO = {
     "continue": "Pick up your saved game right where you left it.",
     "new": "Deal a new game with the settings below.",
     "draw": "Cards turned over per click on the stock. 3 is the classic, harder game.",
-    "auto": "Finish the game automatically once the win is certain.",
+    "deals": "Winnable only: every deal is checked by a solver first, so it can always be won.",
+    "anim": "Fireworks when you win (any key or click skips them).",
     "whatsnew": "What changed in recent updates.",
     "help": "Rules, mouse and keys, scoring.",
     "stats": "Wins, streaks, best times.",
@@ -1324,8 +1488,10 @@ class MenuScreen(Screen):
                      index=1 if int(settings.get("draw", 1)) == 3 else 0),
             MenuItem("scoring", "Scoring", "choice", [(SCORING_LABELS[s], s) for s in SCORINGS],
                      index=SCORINGS.index(scoring) if scoring in SCORINGS else 0),
-            MenuItem("auto", "Auto-finish", "choice", [("on", True), ("off", False)],
-                     index=0 if settings.get("auto_finish", True) else 1),
+            MenuItem("deals", "Deals", "choice", [("winnable only", True), ("random", False)],
+                     index=0 if settings.get("winnable", True) else 1),
+            MenuItem("anim", "Win animation", "choice", [("on", True), ("off", False)],
+                     index=0 if settings.get("win_animation", True) else 1),
             MenuItem("timer", "Clock", "choice", [("shown", True), ("hidden", False)],
                      index=0 if settings.get("timer", True) else 1),
             MenuItem("whatsnew", "What's new"),
@@ -1375,6 +1541,9 @@ class MenuScreen(Screen):
         menu.set_visible("continue", bool(snap and snap.get("game")))
         self._update_info()
 
+    def say(self, text: str) -> None:
+        self.query_one("#menu-info", Static).update(f"[dim]{text}[/dim]")
+
     def _update_info(self) -> None:
         menu = self.query_one(AsciiMenu)
         item = menu.current_item()
@@ -1389,6 +1558,8 @@ class MenuScreen(Screen):
             g = snap.get("game") or {}
             info = (f"Deal #{g.get('seed', '?')}, {g.get('moves', 0)} moves, "
                     f"{fmt_time(float(g.get('elapsed', 0)))} on the clock.")
+        elif item.id == "new" and getattr(self.app, "_searching", False):
+            info = "Shuffling a winnable deal..."
         elif item.id == "new" and load_game_snapshot():
             info = "Deal a new game. Your saved game then counts as a loss."
         else:
@@ -1402,10 +1573,14 @@ class MenuScreen(Screen):
     @on(AsciiMenu.Changed)
     def _changed(self, event: AsciiMenu.Changed) -> None:
         settings = load_settings()
-        key = {"draw": "draw", "scoring": "scoring", "auto": "auto_finish", "timer": "timer"}.get(event.item_id)
+        key = {"draw": "draw", "scoring": "scoring", "deals": "winnable",
+               "anim": "win_animation", "timer": "timer"}.get(event.item_id)
         if key:
             settings[key] = event.value
             save_settings(settings)
+            app = self.app
+            if isinstance(app, SolitaireApp):
+                app.top_up_pool()
         self._update_info()
 
     @on(AsciiMenu.Activated)
@@ -1489,6 +1664,7 @@ class SolitaireApp(App):
         self.initial = initial
         self.resume = resume
         self._restart_args: Optional[list[str]] = None
+        self._searching = False
 
     def on_mount(self) -> None:
         self.push_screen(MenuScreen())
@@ -1500,6 +1676,7 @@ class SolitaireApp(App):
         self._whats_new()
         if not self.no_update:
             self._update_check()
+        self.top_up_pool()
 
     # -- games -----------------------------------------------------------
     def _game_screen(self) -> Optional[GameScreen]:
@@ -1523,19 +1700,77 @@ class SolitaireApp(App):
             )
         clear_saved_game()
 
+    def _say(self, text: str) -> None:
+        screen = self.screen
+        if isinstance(screen, GameScreen):
+            screen.note(text)
+        elif isinstance(screen, MenuScreen):
+            screen.say(text)
+
     def new_game(self, replace: bool = False, seed: Optional[int] = None,
-                 draw: Optional[int] = None, scoring: Optional[str] = None) -> None:
+                 draw: Optional[int] = None, scoring: Optional[str] = None,
+                 winnable: bool = False) -> None:
+        """Deal a game. Without a fixed deal number and with "winnable only"
+        on, the deal comes from the pre-solved pool or a fresh solver search."""
         settings = load_settings()
-        self._abandon_saved()
         draw = int(draw or settings.get("draw", 1))
         scoring = scoring or str(settings.get("scoring", "standard"))
+        if seed is None and settings.get("winnable", True):
+            pooled = take_pooled_deal(deal_pool_key(draw, scoring))
+            if pooled is not None:
+                self._start_deal(pooled, draw, scoring, replace, winnable=True)
+                return
+            if self._searching:
+                return
+            self._searching = True
+            self._say("Shuffling a winnable deal...")
+            self._search_deal(draw, scoring, replace)
+            return
+        self._start_deal(seed, draw, scoring, replace, winnable=winnable)
+
+    @work(thread=True, exclusive=True, group="deal")
+    def _search_deal(self, draw: int, scoring: str, replace: bool) -> None:
+        worker = get_current_worker()
+        seed = find_winnable_seed(draw, scoring, time_budget=30.0,
+                                  should_stop=lambda: worker.is_cancelled)
+        if not worker.is_cancelled:
+            self.call_from_thread(self._found_deal, seed, draw, scoring, replace)
+
+    def _found_deal(self, seed: Optional[int], draw: int, scoring: str, replace: bool) -> None:
+        self._searching = False
+        if seed is None:
+            self.notify("No winnable deal found in time; this one is random.", timeout=6)
+        self._start_deal(seed, draw, scoring, replace, winnable=seed is not None)
+
+    def _start_deal(self, seed: Optional[int], draw: int, scoring: str, replace: bool,
+                    winnable: bool) -> None:
+        self._abandon_saved()
         game = Klondike(seed=seed, draw=draw, scoring=scoring,
                         bankroll=bankroll() if scoring == "vegas_cumulative" else 0)
-        screen = GameScreen(game, auto_finish=bool(settings.get("auto_finish", True)))
+        game.winnable = winnable
+        screen = GameScreen(game)
         if replace and isinstance(self.screen, GameScreen):
             self.switch_screen(screen)
         else:
             self.push_screen(screen)
+        self.top_up_pool()
+
+    def top_up_pool(self) -> None:
+        """Keep a few solved deals ready for the current settings."""
+        settings = load_settings()
+        if settings.get("winnable", True):
+            self._fill_pool(int(settings.get("draw", 1)), str(settings.get("scoring", "standard")))
+
+    @work(thread=True, exclusive=True, group="pool")
+    def _fill_pool(self, draw: int, scoring: str) -> None:
+        worker = get_current_worker()
+        key = deal_pool_key(draw, scoring)
+        while not worker.is_cancelled and len(load_deal_pool().get(key, [])) < POOL_SIZE:
+            seed = find_winnable_seed(draw, scoring, time_budget=30.0,
+                                      should_stop=lambda: worker.is_cancelled)
+            if seed is None or worker.is_cancelled:
+                return
+            add_pooled_deal(key, seed)
 
     def continue_game(self) -> bool:
         snap = load_game_snapshot()
@@ -1546,8 +1781,7 @@ class SolitaireApp(App):
         except Exception:  # noqa: BLE001
             clear_saved_game()
             return False
-        auto = bool(load_settings().get("auto_finish", True))
-        self.push_screen(GameScreen(game, auto_finish=auto))
+        self.push_screen(GameScreen(game))
         return True
 
     # -- screenshots -----------------------------------------------------

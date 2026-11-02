@@ -11,3 +11,4 @@ def isolated_config(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
     monkeypatch.setattr(cfg, "STATS_FILE", tmp_path / "stats.json")
     monkeypatch.setattr(cfg, "SAVE_FILE", tmp_path / "saved_game.json")
+    monkeypatch.setattr(cfg, "DEALS_FILE", tmp_path / "winnable_deals.json")

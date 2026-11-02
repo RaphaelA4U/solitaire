@@ -4,7 +4,9 @@ Klondike solitaire in your terminal, Claude-terminal style: your terminal's
 own colors, everything in ASCII, no buttons and no dialogs. Play with the
 **mouse** (click, drag and drop, double-click to send a card home) or
 entirely with the **keyboard** (arrows, enter, 1 to 7). Unlimited undo,
-hints, auto-finish, standard and Vegas scoring, and statistics.
+hints, winnable deals only (checked by a built-in solver), a finish
+question for sure wins, win fireworks, standard and Vegas scoring, and
+statistics.
 
 Made the same way as [yahtzee](https://github.com/RaphaelA4U/yahtzee):
 one-line install, Claude-style auto-update on every start.
@@ -61,7 +63,7 @@ empty column. Click the stock (top left) to turn over cards.
 | d | draw from the stock |
 | a | auto-move the card under the cursor |
 | f | send the card under the cursor to its foundation |
-| c | finish once it is a sure win |
+| c | finish a sure win for you |
 | u / ctrl+z | undo |
 | h | hint (press again for the next) |
 | n / r | new deal / restart this deal |
@@ -74,8 +76,14 @@ empty column. Click the stock (top left) to turn over cards.
 - **Scoring**: Standard (points per move, minus time, time bonus on a win),
   Vegas ($52 per deal, $5 per foundation card, limited passes), Vegas
   cumulative (the bankroll carries over), or none.
-- **Auto-finish**: once every card is face up and the win is certain, the
-  game finishes itself.
+- **Deals**: "winnable only" (default) lets a solver play every deal through
+  before you get it, so each one can be won; "random" deals anything. A few
+  solved deals are kept ready in the background, so a new game is instant.
+- **Win animation**: fireworks when you win (default on; any key or click
+  skips them).
+
+Once every card is face up and the win is certain, the game asks whether it
+should finish for you: enter yes, esc keep playing (c finishes later).
 
 Every deal has a number. `solitaire --deal 123456` replays that exact deal.
 
