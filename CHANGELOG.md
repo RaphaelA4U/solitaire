@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.1 (2026-11-03)
+- CI only: the test run uses Ubuntu 24.04 again, which still has Python 3.9.
+
 ## v1.2.0 (2026-11-03)
 - Bigger cards: rank and suit in the corners and a large pip in the middle.
 - A four-color deck: hearts red, diamonds blue, clubs green, spades in your text color.
