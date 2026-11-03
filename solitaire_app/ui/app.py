@@ -78,8 +78,10 @@ LOGO = """\
 ░░░░░░   ░░░░░░  ░░░░░ ░░░░░    ░░░░░   ░░░░░░░░ ░░░░░ ░░░░░      ░░░░░░
 """
 
-CARD_W = 9
+CARD_W = 9           # compact cards, for small terminals
 CARD_H = 5
+BIG_W = 11           # the normal size: rank, suit and a big pip
+BIG_H = 8
 DOUBLE_CLICK = 0.4  # seconds
 
 # Win fireworks: rockets climb, burst into suit symbols, sparks fall and fade.
@@ -97,8 +99,26 @@ def fmt_time(seconds: float) -> str:
     return f"{seconds // 60}:{seconds % 60:02d}"
 
 
+# A four-color deck, so every suit is told apart at a glance. Hearts and
+# diamonds are still the "red" suits for the tableau rule.
+SUIT_STYLES = {
+    "H": "bold #ff5f5f",   # red
+    "D": "bold #4d94ff",   # blue
+    "C": "bold #3ccf6e",   # green
+    "S": "bold",           # the terminal's own text color (black or white)
+}
+
+# Big pips for the middle of a card, drawn with half blocks (7 x 4 cells).
+PIPS = {
+    "H": (" ▄▄ ▄▄ ", "███████", " ▀███▀ ", "   ▀   "),
+    "D": ("  ▄█▄  ", "▄█████▄", "▀█████▀", "  ▀█▀  "),
+    "S": ("  ▄█▄  ", "▄█████▄", "██▀█▀██", "  ▄█▄  "),
+    "C": (" ▄███▄ ", "▄▄▀█▀▄▄", "██▀█▀██", "  ▄█▄  "),
+}
+
+
 def suit_style(card: Card) -> str:
-    return "bold red" if card.red else "bold"
+    return SUIT_STYLES.get(card.suit, "bold")
 
 
 # ---------------------------------------------------------------------------
@@ -141,44 +161,53 @@ class Canvas:
 
 
 def draw_card(cv: Canvas, x: int, y: int, card: Card, border: str = "",
-              selected: bool = False, compact_label: bool = False) -> None:
+              selected: bool = False, compact_label: bool = False,
+              w: int = BIG_W, h: int = BIG_H, pip: bool = True) -> None:
     """A full card at (x, y). Cards drawn later overlap earlier ones, which
     is how the tableau fans: only the top rows of covered cards stay visible."""
+    inner = w - 2
     if not card.up:
         style = border or BACK
-        cv.put(x, y, "+-------+", style)
-        for r in range(1, 4):
+        cv.put(x, y, "+" + "-" * inner + "+", style)
+        for r in range(1, h - 1):
             cv.put(x, y + r, "|", style)
-            cv.put(x + 1, y + r, "░░░░░░░", BACK)
-            cv.put(x + 8, y + r, "|", style)
-        cv.put(x, y + 4, "+-------+", style)
+            cv.put(x + 1, y + r, "░" * inner, BACK)
+            cv.put(x + w - 1, y + r, "|", style)
+        cv.put(x, y + h - 1, "+" + "-" * inner + "+", style)
         return
-    edge = "+=======+" if selected else "+-------+"
+    edge = "+" + ("=" if selected else "-") * inner + "+"
     label = card.label
     lab = suit_style(card)
     cv.put(x, y, edge, border)
     if compact_label:
         # Squeezed fan: the rank rides in the top edge so it stays readable.
         cv.put(x + 1, y, label, lab)
-    cv.put(x, y + 1, "|", border)
-    cv.put(x + 1, y + 1, f"{label:<7}", lab)
-    cv.put(x + 8, y + 1, "|", border)
-    cv.put(x, y + 2, "|", border)
-    cv.put(x + 1, y + 2, f"{label[-1]:^7}", lab)
-    cv.put(x + 8, y + 2, "|", border)
-    cv.put(x, y + 3, "|", border)
-    cv.put(x + 1, y + 3, f"{label:>7}", lab)
-    cv.put(x + 8, y + 3, "|", border)
-    cv.put(x, y + 4, edge, border)
+    for r in range(1, h - 1):
+        cv.put(x, y + r, "|", border)
+        cv.put(x + 1, y + r, " " * inner, "")
+        cv.put(x + w - 1, y + r, "|", border)
+    cv.put(x + 1, y + 1, label, lab)
+    cv.put(x + w - 1 - len(label), y + h - 2, label, lab)
+    art = PIPS.get(card.suit) if pip else None
+    if h >= 8 and art:
+        for r, line in enumerate(art):
+            for i, ch in enumerate(line):
+                if ch != " ":
+                    cv.put(x + 1 + (inner - 7) // 2 + i, y + 2 + r, ch, lab)
+    elif pip:
+        cv.put(x + 1 + inner // 2, y + h // 2, label[-1], lab)
+    cv.put(x, y + h - 1, edge, border)
 
 
-def draw_slot(cv: Canvas, x: int, y: int, mark: str, style: str = "") -> None:
+def draw_slot(cv: Canvas, x: int, y: int, mark: str, style: str = "",
+              w: int = BIG_W, h: int = BIG_H) -> None:
     style = style or "dim"
-    cv.put(x, y, ".-------.", style)
-    cv.put(x, y + 1, ":       :", style)
-    cv.put(x, y + 2, f":{mark:^7}:", style)
-    cv.put(x, y + 3, ":       :", style)
-    cv.put(x, y + 4, "'-------'", style)
+    inner = w - 2
+    cv.put(x, y, "." + "-" * inner + ".", style)
+    for r in range(1, h - 1):
+        text = f"{mark:^{inner}}" if r == h // 2 else " " * inner
+        cv.put(x, y + r, ":" + text + ":", style)
+    cv.put(x, y + h - 1, "'" + "-" * inner + "'", style)
 
 
 # ---------------------------------------------------------------------------
@@ -422,8 +451,10 @@ HELP_TEXT = f"""[b]SOLITAIRE v{__version__}[/b]  [dim]Klondike[/dim]
 
 [b u]Goal[/b u]
   Build all four suits on the foundations (top right), from ace to king.
-  On the tableau you stack downwards in alternating colors (red on black,
-  black on red). Only a king (or a run that starts with one) goes into an
+  On the tableau you stack downwards, alternating a red suit and a black
+  suit. The deck has four colors so every suit stands out: hearts (red)
+  and diamonds (blue) are the red suits, spades and clubs (green) the
+  black ones. Only a king (or a run that starts with one) goes into an
   empty column. Click the stock (top left) to turn over cards.
 
 [b u]Mouse[/b u]
@@ -554,6 +585,7 @@ class Board(Widget, can_focus=True):
         self.hover: Optional[tuple[str, int]] = None
         self.drag_target: Optional[str] = None
         self.gap = 2
+        self.cw, self.ch = BIG_W, BIG_H
         self._rects: list[tuple[int, int, int, int, str, int]] = []
         self._press: Optional[tuple[str, int]] = None
         self._dragging = False
@@ -631,24 +663,33 @@ class Board(Widget, can_focus=True):
             cv.put(x, y + 5, edge, f"bold {WINC}")
 
     # -- geometry --------------------------------------------------------
+    def pick_size(self) -> None:
+        """Big cards when the terminal has room, compact ones otherwise. The
+        tallest column (fanned one row per card) must fit below the top row."""
+        tallest = max(len(self.game.piles[t]) for t in TABLEAU)
+        need = BIG_H + 1 + max(tallest - 1 + BIG_H, 6 + BIG_H)
+        big = self.size.width >= 7 * BIG_W + 6 and self.size.height >= need
+        self.cw, self.ch = (BIG_W, BIG_H) if big else (CARD_W, CARD_H)
+        self.gap = 2 if self.size.width >= 7 * self.cw + 12 else 1
+
     def board_width(self) -> int:
-        return 7 * CARD_W + 6 * self.gap
+        return 7 * self.cw + 6 * self.gap
 
     def col_x(self, col: int) -> int:
         offset = max(0, (self.size.width - self.board_width()) // 2)
-        return offset + col * (CARD_W + self.gap)
+        return offset + col * (self.cw + self.gap)
 
     def tableau_layout(self, pile: str) -> list[int]:
         """Row offsets for every card of a tableau column; face-up cards
         fan two rows apart, squeezed to one when the column gets tall."""
         cards = self.game.piles[pile]
-        avail = max(CARD_H, self.size.height - (CARD_H + 1))
+        avail = max(self.ch, self.size.height - (self.ch + 1))
         for up_step in (2, 1):
             ys, y = [], 0
             for i, card in enumerate(cards):
                 ys.append(y)
                 y += up_step if card.up else 1
-            height = (ys[-1] + CARD_H) if ys else CARD_H
+            height = (ys[-1] + self.ch) if ys else self.ch
             if height <= avail or up_step == 1:
                 return ys
         return []
@@ -684,7 +725,8 @@ class Board(Widget, can_focus=True):
     # -- rendering -------------------------------------------------------
     def render(self) -> Text:
         g = self.game
-        self.gap = 2 if self.size.width >= 7 * CARD_W + 12 else 1
+        self.pick_size()
+        cw, ch = self.cw, self.ch
         cv = Canvas(self.size.width, self.size.height)
         rects: list[tuple[int, int, int, int, str, int]] = []
 
@@ -700,15 +742,15 @@ class Board(Widget, can_focus=True):
                     idx = len(cards) - len(fan) + i
                     top = idx == len(cards) - 1
                     border, selected = self._style_for(pile, idx, top) if top else ("", False)
-                    draw_card(cv, x + 4 * i, y, card, border, selected)
-                rects.append((x, y, x + 4 * (len(fan) - 1) + CARD_W, y + CARD_H, pile, len(cards) - 1))
+                    draw_card(cv, x + 4 * i, y, card, border, selected, w=cw, h=ch, pip=top)
+                rects.append((x, y, x + 4 * (len(fan) - 1) + cw, y + ch, pile, len(cards) - 1))
                 continue
             if cards:
                 card = cards[-1]
                 border, selected = self._style_for(pile, len(cards) - 1, True)
-                draw_card(cv, x, y, card, border, selected)
+                draw_card(cv, x, y, card, border, selected, w=cw, h=ch)
                 if pile == "stock" and len(cards) > 1:
-                    cv.put(x + 1, y + CARD_H, f"{len(cards):^7}", "dim")
+                    cv.put(x + 1, y + ch, f"{len(cards):^{cw - 2}}", "dim")
             else:
                 border, _ = self._style_for(pile, -1, True)
                 if pile == "stock":
@@ -717,19 +759,19 @@ class Board(Widget, can_focus=True):
                     mark = ""
                 else:
                     mark = "A"
-                draw_slot(cv, x, y, mark, border)
-            rects.append((x, y, x + CARD_W, y + CARD_H, pile, len(cards) - 1))
+                draw_slot(cv, x, y, mark, border, w=cw, h=ch)
+            rects.append((x, y, x + cw, y + ch, pile, len(cards) - 1))
 
         # Tableau.
-        base_y = CARD_H + 1
+        base_y = ch + 1
         for col, pile in enumerate(TABLEAU):
             x = self.col_x(col)
             cards = g.piles[pile]
             # Backdrop: the whole column is a drop target.
-            rects.append((x, base_y, x + CARD_W, self.size.height, pile, -1))
+            rects.append((x, base_y, x + cw, self.size.height, pile, -1))
             if not cards:
                 border, _ = self._style_for(pile, -1, True)
-                draw_slot(cv, x, base_y, "K", border)
+                draw_slot(cv, x, base_y, "K", border, w=cw, h=ch)
                 continue
             ys = self.tableau_layout(pile)
             squeezed = any(b - a == 1 and cards[i].up for i, (a, b) in enumerate(zip(ys, ys[1:])))
@@ -737,9 +779,9 @@ class Board(Widget, can_focus=True):
                 top = i == len(cards) - 1
                 border, selected = self._style_for(pile, i, top)
                 draw_card(cv, x, base_y + ys[i], card, border, selected,
-                          compact_label=squeezed and not top)
-                bottom = base_y + (ys[i + 1] if not top else ys[i] + CARD_H)
-                rects.append((x, base_y + ys[i], x + CARD_W, bottom, pile, i))
+                          compact_label=squeezed and not top, w=cw, h=ch)
+                bottom = base_y + (ys[i + 1] if not top else ys[i] + ch)
+                rects.append((x, base_y + ys[i], x + cw, bottom, pile, i))
         self._rects = rects
         if self.banner or self.particles:
             self._draw_fireworks(cv)
@@ -1466,9 +1508,9 @@ def menu_cards() -> str:
     """Four random aces... or not: a little fan of cards for the menu."""
     deck = [Card(r, s, True) for s in "SHDC" for r in range(1, 14)]
     picks = random.sample(deck, 4)
-    cv = Canvas(CARD_W + 3 * 6, CARD_H)
+    cv = Canvas(BIG_W + 3 * 6, BIG_H)
     for i, card in enumerate(picks):
-        draw_card(cv, i * 6, 0, card)
+        draw_card(cv, i * 6, 0, card, pip=i == len(picks) - 1)
     return cv.to_text()
 
 

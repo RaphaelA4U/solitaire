@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.2.0 (2026-11-03)
+- Bigger cards: rank and suit in the corners and a large pip in the middle.
+- A four-color deck: hearts red, diamonds blue, clubs green, spades in your text color.
+- Small terminals (or a very long column) fall back to the compact cards.
+
 ## v1.1.0 (2026-11-02)
 - Winnable deals only (default on): a built-in solver plays every deal through first. Switch to random deals in the menu.
 - A sure win now asks first: enter finishes it for you, esc keeps playing (c finishes later).
