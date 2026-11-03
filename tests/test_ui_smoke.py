@@ -296,7 +296,7 @@ async def test_small_terminal_does_not_crash():
 
 
 @pytest.mark.asyncio
-async def test_big_four_color_cards():
+async def test_big_cards_two_colors():
     from solitaire_app.ui.app import BIG_H, BIG_W, PIPS, SUIT_STYLES
 
     app = SolitaireApp(no_update=True, initial={"draw": 1, "scoring": "standard", "seed": 8})
@@ -309,7 +309,10 @@ async def test_big_four_color_cards():
         for pile in ("t0", "t1", "t2", "t3", "t4", "t5", "t6"):
             card = screen.game.piles[pile][-1]
             assert PIPS[card.suit][1] in text.plain
-        assert len(set(SUIT_STYLES.values())) == 4
+        # Two colors (red and black), told apart within a color by solid
+        # versus outlined pips.
+        assert SUIT_STYLES["H"] == SUIT_STYLES["D"] != SUIT_STYLES["S"] == SUIT_STYLES["C"]
+        assert len({PIPS[s] for s in "HDSC"}) == 4
         styles = {str(span.style) for span in text.spans}
         top_suits = {screen.game.piles[p][-1].suit for p in ("t0", "t1", "t2", "t3", "t4", "t5", "t6")}
         for suit in top_suits:

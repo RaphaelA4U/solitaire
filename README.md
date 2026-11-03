@@ -49,9 +49,9 @@ Build the four suits on the foundations (top right) from ace to king. On the
 tableau you stack downwards, alternating a red and a black suit; only a king
 goes into an empty column. Click the stock (top left) to turn over cards.
 
-The deck has four colors so every suit stands out: hearts red, diamonds blue,
-clubs green, spades in your terminal's text color. Hearts and diamonds are the
-red suits. Cards are drawn big (rank, suit, and a large pip) when the terminal
+Red and black stay the only two colors. Within each color one suit is solid
+and the other open: hearts and spades are solid, diamonds and clubs outlined.
+Cards are drawn big (rank, suit, and a large pip) when the terminal
 has room, and compact on small terminals.
 
 | Mouse | |

@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3.0 (2026-11-03)
+- Back to two colors, red and black, so what fits on what is clear at a glance.
+- Suits within a color are told apart by the pip: hearts and spades solid, diamonds and clubs outlined.
+- The menu shows the four aces, centered.
+- Menu: a space between "Win animation" and its value.
+
 ## v1.2.1 (2026-11-03)
 - CI only: the test run uses Ubuntu 24.04 again, which still has Python 3.9.
 

@@ -99,21 +99,22 @@ def fmt_time(seconds: float) -> str:
     return f"{seconds // 60}:{seconds % 60:02d}"
 
 
-# A four-color deck, so every suit is told apart at a glance. Hearts and
-# diamonds are still the "red" suits for the tableau rule.
+# Two colors, so red-on-black stays easy to read, and within each color
+# one suit is drawn solid and the other open: hearts and spades are solid,
+# diamonds and clubs are outlined.
 SUIT_STYLES = {
     "H": "bold #ff5f5f",   # red
-    "D": "bold #4d94ff",   # blue
-    "C": "bold #3ccf6e",   # green
-    "S": "bold",           # the terminal's own text color (black or white)
+    "D": "bold #ff5f5f",   # red
+    "C": "bold",           # the terminal's own text color (black or white)
+    "S": "bold",
 }
 
 # Big pips for the middle of a card, drawn with half blocks (7 x 4 cells).
 PIPS = {
     "H": (" ▄▄ ▄▄ ", "███████", " ▀███▀ ", "   ▀   "),
-    "D": ("  ▄█▄  ", "▄█████▄", "▀█████▀", "  ▀█▀  "),
+    "D": ("  ▄▀▄  ", "▄▀   ▀▄", "▀▄   ▄▀", "  ▀▄▀  "),
     "S": ("  ▄█▄  ", "▄█████▄", "██▀█▀██", "  ▄█▄  "),
-    "C": (" ▄███▄ ", "▄▄▀█▀▄▄", "██▀█▀██", "  ▄█▄  "),
+    "C": (" ▄▀▀▀▄ ", "▄▄▀▄▀▄▄", "█▄ ▄ ▄█", "  ▄█▄  "),
 }
 
 
@@ -304,7 +305,7 @@ class AsciiMenu(Widget, can_focus=True):
             style = f"bold {ACCENT}" if selected else ("bold" if hovered else "")
             out.append("> " if selected else "  ", style=f"bold {ACCENT}" if selected else "")
             if item.kind == "choice":
-                out.append(f"{item.label:<13}", style=style)
+                out.append(f"{item.label:<15}", style=style)
                 out.append("< ", style="dim")
                 out.append(item.value_label, style=style if selected or hovered else "")
                 out.append(" >", style="dim")
@@ -452,9 +453,8 @@ HELP_TEXT = f"""[b]SOLITAIRE v{__version__}[/b]  [dim]Klondike[/dim]
 [b u]Goal[/b u]
   Build all four suits on the foundations (top right), from ace to king.
   On the tableau you stack downwards, alternating a red suit and a black
-  suit. The deck has four colors so every suit stands out: hearts (red)
-  and diamonds (blue) are the red suits, spades and clubs (green) the
-  black ones. Only a king (or a run that starts with one) goes into an
+  suit. Within each color one suit is solid and one is open: hearts and
+  spades are solid, diamonds and clubs are outlined. Only a king (or a run that starts with one) goes into an
   empty column. Click the stock (top left) to turn over cards.
 
 [b u]Mouse[/b u]
@@ -1505,9 +1505,8 @@ MENU_INFO = {
 
 
 def menu_cards() -> str:
-    """Four random aces... or not: a little fan of cards for the menu."""
-    deck = [Card(r, s, True) for s in "SHDC" for r in range(1, 14)]
-    picks = random.sample(deck, 4)
+    """A little fan of the four aces for the menu."""
+    picks = [Card(1, suit, True) for suit in "HCDS"]
     cv = Canvas(BIG_W + 3 * 6, BIG_H)
     for i, card in enumerate(picks):
         draw_card(cv, i * 6, 0, card, pip=i == len(picks) - 1)
@@ -1675,7 +1674,7 @@ class SolitaireApp(App):
     #menu-box { width: auto; height: auto; max-height: 100%; overflow-y: auto; scrollbar-size-vertical: 0; }
     #menu-logo { width: auto; }
     #menu-logo-small { width: auto; text-style: bold; margin-bottom: 1; }
-    #menu-cards { width: auto; margin-top: 1; padding-left: 4; }
+    #menu-cards { width: 100%; content-align: center top; margin-top: 1; }
     #menu-version { color: ansi_bright_black; margin-top: 1; margin-bottom: 1; }
     AsciiMenu { width: auto; height: auto; padding-left: 4; }
     #menu-info { height: 2; margin-top: 1; padding-left: 4; }
