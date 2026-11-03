@@ -83,6 +83,7 @@ CARD_H = 5
 BIG_W = 11           # the normal size: rank, suit and a big pip
 BIG_H = 8
 DOUBLE_CLICK = 0.4  # seconds
+IDLE_PAUSE = 120.0  # the clock stops after this long without a key or mouse
 
 # Win fireworks: rockets climb, burst into suit symbols, sparks fall and fade.
 FX_DT = 0.05            # seconds per frame
@@ -506,6 +507,12 @@ HELP_TEXT = f"""[b]SOLITAIRE v{__version__}[/b]  [dim]Klondike[/dim]
   A deal counts once you have made a move: as a win, or as a loss when you
   start another deal instead. Quitting halfway is fine: the game is saved
   and "Continue" picks it up again.
+  Every move of every deal is kept in ~/.config/solitaire/games.jsonl, so
+  a game can be replayed and reviewed afterwards (about 1.5 KB a deal).
+
+[b u]Clock[/b u]
+  The clock only runs while you play: it pauses when the terminal is in the
+  background, and after two minutes without a key or a click.
 
 [b u]Updates[/b u]
   Like Claude Code, the game updates itself on start when a new version
@@ -981,6 +988,8 @@ class GameScreen(Screen):
         right.append(f"{g.moves}", style="bold")
         if load_settings().get("timer", True):
             right.append("   ")
+            if g.started and not g.is_won() and not self.app.clock_running():
+                right.append("paused ", style="dim")
             right.append(fmt_time(g.elapsed), style="bold")
         right.append(" ")
         width = self.size.width or 80
@@ -1000,6 +1009,10 @@ class GameScreen(Screen):
     def _tick(self) -> None:
         g = self.game
         if not g.started or g.is_won() or self.app.screen is not self:
+            return
+        if not self.app.clock_running():
+            # Terminal in the background, or nobody at the keyboard.
+            self.query_one("#statusbar", Static).update(self._status_text())
             return
         g.elapsed += 1
         self.query_one("#statusbar", Static).update(self._status_text())
@@ -1053,7 +1066,8 @@ class GameScreen(Screen):
         if not self.recorded:
             self.recorded = True
             record_game(self._stats_entry(won=True),
-                        bankroll_after=g.bankroll if g.scoring == "vegas_cumulative" else None)
+                        bankroll_after=g.bankroll if g.scoring == "vegas_cumulative" else None,
+                        log=g.log)
             clear_saved_game()
         parts = [f"{fmt_time(g.elapsed)}", f"{g.moves} moves"]
         if g.scoring == "standard":
@@ -1096,7 +1110,8 @@ class GameScreen(Screen):
             return
         self.recorded = True
         record_game(self._stats_entry(won=False),
-                    bankroll_after=g.bankroll if g.scoring == "vegas_cumulative" else None)
+                    bankroll_after=g.bankroll if g.scoring == "vegas_cumulative" else None,
+                    log=g.log)
         clear_saved_game()
 
     # -- finishing a sure win ---------------------------------------------
@@ -1706,6 +1721,25 @@ class SolitaireApp(App):
         self.resume = resume
         self._restart_args: Optional[list[str]] = None
         self._searching = False
+        self.window_focused = True
+        self.last_input = time.monotonic()
+
+    # -- the game clock only runs while you are actually playing ---------
+    def clock_running(self) -> bool:
+        return self.window_focused and time.monotonic() - self.last_input < IDLE_PAUSE
+
+    async def on_event(self, event: events.Event) -> None:
+        if isinstance(event, (events.Key, events.MouseDown, events.MouseUp, events.MouseMove,
+                              events.MouseScrollDown, events.MouseScrollUp)):
+            self.last_input = time.monotonic()
+        await super().on_event(event)
+
+    def on_app_blur(self) -> None:
+        self.window_focused = False
+
+    def on_app_focus(self) -> None:
+        self.window_focused = True
+        self.last_input = time.monotonic()
 
     def on_mount(self) -> None:
         self.push_screen(MenuScreen())
@@ -1738,6 +1772,7 @@ class SolitaireApp(App):
                 {"won": False, "draw": game.draw, "scoring": game.scoring, "score": game.score,
                  "moves": game.moves, "time": int(game.elapsed), "seed": game.seed},
                 bankroll_after=game.bankroll if game.scoring == "vegas_cumulative" else None,
+                log=game.log,
             )
         clear_saved_game()
 

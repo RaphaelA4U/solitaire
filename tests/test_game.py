@@ -186,3 +186,27 @@ def test_standard_score_time_and_bonus():
             g.move(src, len(g.piles[src]) - 1, dst)
     assert g.is_won()
     assert g.score > 7000  # time bonus 700000 / 95
+
+
+def test_move_log_replays_the_game():
+    g = Klondike(seed=4242, draw=1)
+    for _ in range(30):
+        moves = g.legal_moves(include_draw=False)
+        if moves:
+            m = moves[0]
+            g.move(m.src, m.index, m.dst)
+        else:
+            g.draw_stock()
+        g.elapsed += 3
+    g.undo()
+    g.draw_stock()
+    assert g.log[-2].startswith("u@") and g.log[-1].startswith("d@")
+    again = Klondike.replay(g.seed, g.draw, g.scoring, g.log)
+    assert again.to_dict()["piles"] == g.to_dict()["piles"]
+    assert (again.moves, again.base_score, again.passes) == (g.moves, g.base_score, g.passes)
+    # The log survives a save, and simulations on clones do not touch it.
+    assert Klondike.from_dict(g.to_dict()).log == g.log
+    n = len(g.log)
+    g.has_moves()
+    g.autocomplete_plan()
+    assert len(g.log) == n

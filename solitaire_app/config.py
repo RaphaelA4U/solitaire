@@ -21,6 +21,7 @@ SETTINGS_FILE = CONFIG_DIR / "settings.json"
 STATS_FILE = CONFIG_DIR / "stats.json"
 SAVE_FILE = CONFIG_DIR / "saved_game.json"
 DEALS_FILE = CONFIG_DIR / "winnable_deals.json"
+GAMES_FILE = CONFIG_DIR / "games.jsonl"  # every finished deal with all its moves
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "draw": 1,                  # 1 | 3 cards per stock turn
@@ -125,13 +126,39 @@ def bankroll() -> int:
     return int(load_stats().get("bankroll", 0))
 
 
-def record_game(entry: dict[str, Any], bankroll_after: int | None = None) -> None:
-    """Record one finished or abandoned deal (abandoning = a loss)."""
+def record_game(entry: dict[str, Any], bankroll_after: int | None = None,
+                log: list[str] | None = None) -> None:
+    """Record one finished or abandoned deal (abandoning = a loss). With a
+    move log, the whole game is also appended to games.jsonl (one line per
+    deal, about 1.5 KB) so it can be replayed and reviewed later."""
+    date = datetime.now().isoformat(timespec="seconds")
     stats = load_stats()
-    stats["games"].append(dict(entry, date=datetime.now().isoformat(timespec="seconds")))
+    stats["games"].append(dict(entry, date=date))
     if bankroll_after is not None:
         stats["bankroll"] = int(bankroll_after)
     _write_json(STATS_FILE, stats)
+    if log is not None:
+        try:
+            GAMES_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with GAMES_FILE.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(dict(entry, date=date, log=list(log)), ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+
+def load_game_logs() -> list[dict[str, Any]]:
+    """Every recorded deal with its moves, oldest first."""
+    games = []
+    try:
+        lines = GAMES_FILE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return games
+    for line in lines:
+        try:
+            games.append(json.loads(line))
+        except ValueError:
+            continue
+    return games
 
 
 def _fmt_time(seconds: float) -> str:

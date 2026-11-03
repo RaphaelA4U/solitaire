@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.4.0 (2026-11-03)
+- Every move of every deal is kept in `~/.config/solitaire/games.jsonl` (undos included, with the clock time), so games can be replayed and reviewed afterwards. About 1.5 KB per deal.
+- The clock pauses when the terminal is in the background, and after two minutes without a key or a click. The status bar then shows "paused".
+
 ## v1.3.0 (2026-11-03)
 - Back to two colors, red and black, so what fits on what is clear at a glance.
 - Suits within a color are told apart by the pip: hearts and spades solid, diamonds and clubs outlined.

@@ -7,7 +7,7 @@ auto-finish, saving/continuing, and the statistics bookkeeping.
 import pytest
 
 from solitaire_app import config
-from solitaire_app.game import FOUNDATIONS, SUITS, Card
+from solitaire_app.game import FOUNDATIONS, SUITS, Card, Klondike
 from solitaire_app.ui.app import (
     CARD_H,
     AsciiMenu,
@@ -281,6 +281,35 @@ async def test_save_continue_and_new_deal_counts_loss():
         assert isinstance(app.screen, GameScreen) and app.screen.game.moves == 0
         stats = config.load_stats()
         assert [g["won"] for g in stats["games"]] == [False]
+        # The abandoned deal is kept with its moves, and replays to where it was.
+        logs = config.load_game_logs()
+        assert len(logs) == 1 and logs[0]["seed"] == 15 and logs[0]["log"][0].startswith("d@")
+        again = Klondike.replay(15, 3, "standard", logs[0]["log"])
+        assert len(again.piles["waste"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_clock_pauses_in_background_and_when_idle():
+    app = SolitaireApp(no_update=True, initial={"draw": 1, "scoring": "standard", "seed": 8})
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await start(pilot, app)
+        await pilot.press("d")
+        g = screen.game
+        t = g.elapsed
+        screen._tick()
+        assert g.elapsed == t + 1
+        app.on_app_blur()
+        screen._tick()
+        assert g.elapsed == t + 1 and "paused" in screen._status_text().plain
+        app.on_app_focus()
+        screen._tick()
+        assert g.elapsed == t + 2
+        app.last_input -= 1000  # walked away from the keyboard
+        screen._tick()
+        assert g.elapsed == t + 2
+        await pilot.press("h")  # any key starts it again
+        screen._tick()
+        assert g.elapsed == t + 3
 
 
 @pytest.mark.asyncio

@@ -101,6 +101,10 @@ class Klondike:
         self.started = False     # timer starts at the first action
         self.winnable = False    # proven winnable by the solver when dealt
         self.history: list[dict] = []
+        # Every action of this deal in order, undos included, so a game can be
+        # replayed and reviewed later. "d" = stock turn, "u" = undo,
+        # "t3:4>f0" = move from pile t3, card index 4, to f0; "@n" = clock.
+        self.log: list[str] = []
         self._deal()
 
     # -- setup -----------------------------------------------------------
@@ -144,9 +148,13 @@ class Klondike:
     def can_undo(self) -> bool:
         return bool(self.history)
 
+    def _record(self, action: str) -> None:
+        self.log.append(f"{action}@{int(self.elapsed)}")
+
     def undo(self) -> bool:
         if not self.history:
             return False
+        self._record("u")
         moves = self.moves
         self._load_state(self.history.pop())
         self.moves = moves + 1  # undo counts as a move, like the classics
@@ -163,6 +171,7 @@ class Klondike:
             started=self.started,
             winnable=self.winnable,
             history=self.history[-SAVED_UNDO_LIMIT:],
+            log=self.log,
         )
         return data
 
@@ -179,12 +188,32 @@ class Klondike:
         game.started = bool(data.get("started", False))
         game.winnable = bool(data.get("winnable", False))
         game.history = list(data.get("history", []))
+        game.log = [str(a) for a in data.get("log", [])]
+        return game
+
+    @classmethod
+    def replay(cls, seed: int, draw: int, scoring: str, log: list[str],
+               upto: Optional[int] = None) -> "Klondike":
+        """The deal after the first `upto` logged actions (all by default)."""
+        game = cls(seed=seed, draw=draw, scoring=scoring)
+        for entry in log[:upto]:
+            action, _, clock = entry.partition("@")
+            game.elapsed = float(clock or 0)
+            if action == "d":
+                game.draw_stock()
+            elif action == "u":
+                game.undo()
+            else:
+                src, rest = action.split(":", 1)
+                index, dst = rest.split(">", 1)
+                game.move("waste" if src == "w" else src, int(index), dst)
         return game
 
     def clone(self) -> "Klondike":
         other = copy.copy(self)
         other.piles = {p: [Card(c.rank, c.suit, c.up) for c in cards] for p, cards in self.piles.items()}
         other.history = []
+        other.log = []
         return other
 
     # -- scoring ---------------------------------------------------------
@@ -319,6 +348,7 @@ class Klondike:
         stock, waste = self.piles["stock"], self.piles["waste"]
         if stock:
             self._checkpoint()
+            self._record("d")
             for _ in range(min(self.draw, len(stock))):
                 card = stock.pop()
                 card.up = True
@@ -327,6 +357,7 @@ class Klondike:
             return True
         if self.can_recycle():
             self._checkpoint()
+            self._record("d")
             while waste:
                 card = waste.pop()
                 card.up = False
@@ -344,6 +375,7 @@ class Klondike:
         if not self.can_move(src, index, dst):
             return False
         self._checkpoint()
+        self._record(f"{'w' if src == 'waste' else src}:{index}>{dst}")
         cards = self.piles[src]
         run = cards[index:]
         del cards[index:]
