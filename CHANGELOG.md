@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.5.1 (2026-11-09)
+- Saved games carry a `progress` count (cards home), so a beheer race reads every race game the same way.
+
 ## v1.5.0 (2026-11-09)
 - Review (v, or "Review last game" in the menu): every move of the game, and for a lost deal the move after which it could no longer be won, with a move that would have kept it winnable.
 - Chat battles: `solitaire --battle ID` gives everyone of a beheer battle the same winnable deal; reopening carries on with it.

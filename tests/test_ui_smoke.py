@@ -308,8 +308,9 @@ async def test_clock_pauses_in_background_and_when_idle():
         screen._tick()
         assert g.elapsed == t + 2
         await pilot.press("h")  # any key starts it again
+        t2 = g.elapsed  # the real one-second timer may have ticked meanwhile
         screen._tick()
-        assert g.elapsed == t + 3
+        assert g.elapsed == t2 + 1
 
 
 @pytest.mark.asyncio

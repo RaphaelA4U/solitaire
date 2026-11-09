@@ -172,6 +172,8 @@ class Klondike:
             started=self.started,
             winnable=self.winnable,
             battle=self.battle,
+            # Race contract (BM Beheer chat battles): cards home so far.
+            progress=sum(len(self.piles[f]) for f in FOUNDATIONS),
             history=self.history[-SAVED_UNDO_LIMIT:],
             log=self.log,
         )

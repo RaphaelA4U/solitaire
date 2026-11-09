@@ -254,3 +254,10 @@ def test_review_of_a_won_game():
     replay(g, solution(Klondike(seed=sys_path_seed, draw=1)))
     lines = review_lines(sys_path_seed, 1, "standard", g.log, won=True, node_limit=30_000)
     assert any("Well played" in l for l in lines)
+
+
+def test_save_carries_race_progress():
+    g = Klondike(seed=8, draw=1)
+    assert g.to_dict()["progress"] == 0
+    g.piles["f0"] = [g.piles["t0"].pop()]
+    assert g.to_dict()["progress"] == 1
