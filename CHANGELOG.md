@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.5.0 (2026-11-09)
+- Review (v, or "Review last game" in the menu): every move of the game, and for a lost deal the move after which it could no longer be won, with a move that would have kept it winnable.
+- Chat battles: `solitaire --battle ID` gives everyone of a beheer battle the same winnable deal; reopening carries on with it.
+- `--deal N` carries on with a saved game of that same deal instead of starting over.
+- The menu no longer cuts off the ">" behind "Vegas (cumulative)".
+
 ## v1.4.0 (2026-11-03)
 - Every move of every deal is kept in `~/.config/solitaire/games.jsonl` (undos included, with the clock time), so games can be replayed and reviewed afterwards. About 1.5 KB per deal.
 - The clock pauses when the terminal is in the background, and after two minutes without a key or a click. The status bar then shows "paused".

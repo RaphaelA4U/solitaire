@@ -210,3 +210,47 @@ def test_move_log_replays_the_game():
     g.has_moves()
     g.autocomplete_plan()
     assert len(g.log) == n
+
+
+def test_review_finds_the_turning_point():
+    import random as _random
+
+    from solitaire_app.review import _winnable, review_lines
+    from solitaire_app.solver import find_winnable_seed
+
+    rng = _random.Random(4)
+    seed = find_winnable_seed(draw=1, rng=_random.Random(9), time_budget=30)
+    for attempt in range(40):
+        g = Klondike(seed=seed, draw=1)
+        lost_at = None
+        for step in range(60):
+            moves = g.legal_moves(include_draw=False)
+            if moves and rng.random() < 0.7:
+                m = rng.choice(moves)
+                g.move(m.src, m.index, m.dst)
+            elif not g.draw_stock():
+                break
+            if _winnable(g, 30_000) is not True:
+                lost_at = len(g.log) - 1
+                break
+        if lost_at is not None:
+            break
+    assert lost_at is not None, "random play should lose a winnable deal at some point"
+    lines = review_lines(seed, 1, "standard", g.log, won=False, node_limit=30_000)
+    text = "\n".join(lines)
+    assert f"action {lost_at + 1} at" in text
+    assert "Every action" in text and len([l for l in lines if l.startswith(("  ", "> ", "[bold red]>"))]) >= len(g.log)
+
+
+def test_review_of_a_won_game():
+    from solitaire_app.review import review_lines
+    from solitaire_app.solver import find_winnable_seed, solution
+    import random as _random
+
+    sys_path_seed = find_winnable_seed(draw=1, rng=_random.Random(2), time_budget=30)
+    g = Klondike(seed=sys_path_seed, draw=1)
+    from tests.test_solver import replay  # noqa: E402
+
+    replay(g, solution(Klondike(seed=sys_path_seed, draw=1)))
+    lines = review_lines(sys_path_seed, 1, "standard", g.log, won=True, node_limit=30_000)
+    assert any("Well played" in l for l in lines)

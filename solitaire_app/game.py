@@ -100,6 +100,7 @@ class Klondike:
         self.elapsed = 0.0       # seconds, maintained by the UI
         self.started = False     # timer starts at the first action
         self.winnable = False    # proven winnable by the solver when dealt
+        self.battle: Optional[int] = None  # a chat battle id (beheer), when raced
         self.history: list[dict] = []
         # Every action of this deal in order, undos included, so a game can be
         # replayed and reviewed later. "d" = stock turn, "u" = undo,
@@ -170,6 +171,7 @@ class Klondike:
             elapsed=self.elapsed,
             started=self.started,
             winnable=self.winnable,
+            battle=self.battle,
             history=self.history[-SAVED_UNDO_LIMIT:],
             log=self.log,
         )
@@ -187,6 +189,7 @@ class Klondike:
         game.elapsed = float(data.get("elapsed", 0.0))
         game.started = bool(data.get("started", False))
         game.winnable = bool(data.get("winnable", False))
+        game.battle = int(data["battle"]) if data.get("battle") else None
         game.history = list(data.get("history", []))
         game.log = [str(a) for a in data.get("log", [])]
         return game

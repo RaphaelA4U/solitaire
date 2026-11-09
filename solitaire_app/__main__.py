@@ -31,6 +31,10 @@ def main() -> None:
         "--deal", type=int, metavar="N",
         help="play deal number N (1-999999); the same number is the same deal",
     )
+    parser.add_argument(
+        "--battle", type=int, metavar="ID",
+        help="play chat battle ID (from beheer): everyone gets the same winnable deal",
+    )
     args = parser.parse_args()
 
     if args.profile:
@@ -61,7 +65,9 @@ def main() -> None:
         parser.error("deal numbers run from 1 to 999999")
 
     initial = None
-    if args.new or args.draw or args.scoring or args.deal is not None:
+    if args.battle is not None:
+        initial = {"draw": 1, "scoring": "standard", "seed": None, "battle": args.battle}
+    elif args.new or args.draw or args.scoring or args.deal is not None:
         from .config import load_settings
 
         settings = load_settings()

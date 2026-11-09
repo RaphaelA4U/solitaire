@@ -71,6 +71,7 @@ has room, and compact on small terminals.
 | c | finish a sure win for you |
 | u / ctrl+z | undo |
 | h | hint (press again for the next) |
+| v | review: every move, and where a lost deal was lost |
 | n / r | new deal / restart this deal |
 | esc | put cards down, or back to the menu (auto-saved) |
 | ? | help, F2 screenshot (SVG into Downloads) |
@@ -97,6 +98,7 @@ solitaire --new                 deal right away with your saved settings
 solitaire --draw 3 --deal 42    a specific deal with draw 3
 solitaire --scoring vegas       standard | vegas | vegas_cumulative | none
 solitaire --resume              reopen the saved game
+solitaire --battle ID           a beheer chat battle: the same winnable deal for everyone
 solitaire --profile NAME        separate settings, stats, and save
 ```
 

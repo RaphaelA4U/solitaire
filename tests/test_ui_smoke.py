@@ -346,3 +346,93 @@ async def test_big_cards_two_colors():
         top_suits = {screen.game.piles[p][-1].suit for p in ("t0", "t1", "t2", "t3", "t4", "t5", "t6")}
         for suit in top_suits:
             assert SUIT_STYLES[suit] in styles
+
+
+@pytest.mark.asyncio
+async def test_review_page_in_game_and_from_menu():
+    from solitaire_app.ui.app import ReviewPage
+
+    app = SolitaireApp(no_update=True, initial={"draw": 1, "scoring": "standard", "seed": 8})
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await start(pilot, app)
+        await pilot.press("d", "d", "v")
+        assert isinstance(app.screen, ReviewPage)
+        for _ in range(200):
+            await pilot.pause(0.05)
+            body = str(app.screen.query_one("#page-body").render())
+            if "Every action" in body:
+                break
+        assert "Every action" in body and "draw" in body
+        await pilot.press("escape")
+        assert app.screen is screen
+        # Leaving for a new deal records the game; the menu then offers its review.
+        await pilot.press("n")
+        for _ in range(100):
+            await pilot.pause(0.05)
+            if isinstance(app.screen, GameScreen) and app.screen is not screen:
+                break
+        await pilot.press("escape")
+        await pilot.pause()
+        menu = app.screen.query_one(AsciiMenu)
+        assert menu.item("review").visible
+        assert config.load_game_logs()[-1]["seed"] == 8
+
+
+@pytest.mark.asyncio
+async def test_same_deal_number_resumes_the_saved_game():
+    app = SolitaireApp(no_update=True, initial={"draw": 1, "scoring": "standard", "seed": 77})
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await start(pilot, app)
+        await pilot.press("d", "d", "escape")
+        await pilot.pause()
+    app = SolitaireApp(no_update=True, initial={"draw": 1, "scoring": "standard", "seed": 77})
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await start(pilot, app)
+        assert screen.game.seed == 77 and len(screen.game.piles["waste"]) == 2
+    assert config.load_stats()["games"] == []  # nothing counted as a loss
+
+
+@pytest.mark.asyncio
+async def test_menu_is_wide_enough_for_every_choice():
+    app = SolitaireApp(no_update=True)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.pause()
+        menu = app.screen.query_one(AsciiMenu)
+        widest = max(len(line) for line in menu.render().plain.splitlines())
+        for item in menu.items:
+            for i in range(len(item.choices)):
+                item.index = i
+                widest = max(widest, max(len(l) for l in menu.render().plain.splitlines()))
+        assert menu.get_content_width(None, None) >= widest
+
+
+@pytest.mark.asyncio
+async def test_battle_deal_is_shared_winnable_and_resumes():
+    from solitaire_app.solver import battle_seed, is_winnable
+
+    seed = battle_seed(12)
+    assert seed == battle_seed(12) and is_winnable(seed, 1, "standard")
+    app = SolitaireApp(no_update=True, initial={"draw": 1, "scoring": "standard", "seed": None, "battle": 12})
+    async with app.run_test(size=SIZE) as pilot:
+        for _ in range(200):
+            await pilot.pause(0.05)
+            if isinstance(app.screen, GameScreen):
+                break
+        g = app.screen.game
+        assert g.seed == seed and g.battle == 12 and "Battle" in app.screen._status_text().plain
+        await pilot.press("d", "r")  # restart in a battle = undo everything, same game
+        assert app.screen.game is g and g.battle == 12 and not g.piles["waste"]
+        await pilot.press("d", "escape")
+        await pilot.pause()
+    assert config.load_game_snapshot()["game"]["battle"] == 12
+    app = SolitaireApp(no_update=True, initial={"draw": 1, "scoring": "standard", "seed": None, "battle": 12})
+    async with app.run_test(size=SIZE) as pilot:
+        screen = await start(pilot, app)
+        assert screen.game.battle == 12 and len(screen.game.piles["waste"]) == 1
+        await pilot.press("n")  # leaving the battle counts as giving up
+        for _ in range(100):
+            await pilot.pause(0.05)
+            if isinstance(app.screen, GameScreen) and app.screen.game.battle is None:
+                break
+    entry = config.load_stats()["games"][-1]
+    assert entry["battle"] == 12 and entry["won"] is False

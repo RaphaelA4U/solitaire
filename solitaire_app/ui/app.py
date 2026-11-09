@@ -41,6 +41,7 @@ from ..config import (
     load_deal_pool,
     take_pooled_deal,
     clear_saved_game,
+    load_game_logs,
     load_game_snapshot,
     load_settings,
     record_game,
@@ -59,6 +60,7 @@ from ..game import (
     Move,
 )
 from ..solver import find_winnable_seed
+from ..review import review_lines
 from ..update import REPO_DIR, check_and_update
 
 ACCENT = "#875fff"   # Claude-style purple, leaning slightly blue
@@ -277,7 +279,7 @@ class AsciiMenu(Widget, can_focus=True):
         for item in self.items:
             if item.kind == "choice":
                 widest = max((len(lbl) for lbl, _ in item.choices), default=0)
-                width = max(width, 2 + 13 + 2 + widest + 2)
+                width = max(width, 2 + 15 + 2 + widest + 2)  # same 15 as render()
             else:
                 width = max(width, 2 + len(item.label))
         return width + 1
@@ -449,6 +451,46 @@ class TextPage(Screen):
         self.app.pop_screen()
 
 
+class ReviewPage(TextPage):
+    """A text page whose body is worked out in the background (the solver
+    checks every position), with a progress line meanwhile."""
+
+    def __init__(self, title: str, job) -> None:
+        super().__init__(title, "[dim]Looking at the game...[/dim]")
+        self._job = job
+
+    def on_mount(self) -> None:
+        super().on_mount()
+        self._analyse()
+
+    @work(thread=True, exclusive=True, group="review")
+    def _analyse(self) -> None:
+        worker = get_current_worker()
+
+        def progress(done: int, total: int) -> None:
+            if not worker.is_cancelled:
+                self.app.call_from_thread(self._show, f"[dim]Looking at every move... {done}/{total}[/dim]")
+
+        lines = self._job(progress)
+        if not worker.is_cancelled:
+            self.app.call_from_thread(self._show, "\n".join(lines))
+
+    def _show(self, body: str) -> None:
+        try:
+            self.query_one("#page-body", Static).update(body)
+        except Exception:  # noqa: BLE001 - page already closed
+            pass
+
+
+def review_page(entry: dict) -> ReviewPage:
+    """A review of a game given its seed, draw, scoring and log."""
+    def job(progress):
+        return review_lines(int(entry["seed"]), int(entry.get("draw", 1)),
+                            str(entry.get("scoring", "standard")), list(entry.get("log") or []),
+                            bool(entry.get("won")), progress=progress)
+    return ReviewPage("Review", job)
+
+
 HELP_TEXT = f"""[b]SOLITAIRE v{__version__}[/b]  [dim]Klondike[/dim]
 
 [b u]Goal[/b u]
@@ -477,6 +519,7 @@ HELP_TEXT = f"""[b]SOLITAIRE v{__version__}[/b]  [dim]Klondike[/dim]
   [b]c[/b]              finish a sure win for you
   [b]u / ctrl+z[/b]     undo (as often as you like)
   [b]h[/b]              hint; press again for the next one
+  [b]v[/b]              review: every move so far, and where the deal was lost
   [b]n[/b]              new deal        [b]r[/b]  restart this deal
   [b]esc[/b]            put the cards down, or back to the menu (auto-saved)
   [b]?[/b]              this page       [b]ctrl+q[/b]  quit       [b]F2[/b]  screenshot (SVG)
@@ -893,6 +936,7 @@ FOOTER_FINISH = [
 ]
 FOOTER_WON = [
     ("n new deal", "new"),
+    ("v review", "review"),
     ("r replay deal", "restart"),
     ("m menu", "menu"),
     ("ctrl+q quit", "quit"),
@@ -916,6 +960,7 @@ class GameScreen(Screen):
         Binding("n", "new_deal", show=False),
         Binding("r", "restart", show=False),
         Binding("m", "menu", show=False),
+        Binding("v", "review", show=False),
         Binding("escape", "escape", show=False),
         Binding("question_mark,f1", "help", show=False),
         Binding("ctrl+q", "quit_app", show=False),
@@ -973,6 +1018,8 @@ class GameScreen(Screen):
         left = Text(" ")
         left.append("SOLITAIRE", style=f"bold {ACCENT}")
         left.append(f"  Deal #{g.seed}  Draw {g.draw}", style="dim")
+        if g.battle:
+            left.append("  Battle", style=f"bold {WINC}")
         if g.max_passes:
             left.append(f"  Pass {min(g.passes, g.max_passes)}/{g.max_passes}", style="dim")
         right = Text()
@@ -1058,7 +1105,7 @@ class GameScreen(Screen):
         if self._offer:  # undone back to before the sure win
             self._close_offer()
         if g.started and not g.has_moves():
-            self.note("[red]No more moves.[/] [b]u[/b] undo, [b]r[/b] restart this deal, [b]n[/b] new deal.")
+            self.note("[red]No more moves.[/] [b]u[/b] undo, [b]r[/b] restart, [b]n[/b] new deal, [b]v[/b] review.")
 
     def _won(self) -> None:
         g = self.game
@@ -1101,6 +1148,7 @@ class GameScreen(Screen):
             "moves": g.moves,
             "time": int(g.elapsed),
             "seed": g.seed,
+            **({"battle": g.battle} if g.battle else {}),
         }
 
     def abandon(self) -> None:
@@ -1292,6 +1340,7 @@ class GameScreen(Screen):
             "decline": self.action_decline,
             "help": self.action_help,
             "menu": self.action_menu,
+            "review": self.action_review,
             "quit": self.action_quit_app,
         }.get(event.action)
         if action:
@@ -1473,6 +1522,14 @@ class GameScreen(Screen):
             return
         app = self.app
         assert isinstance(app, SolitaireApp)
+        if self.game.battle:
+            # In a chat battle the deal must stay the same game (and the clock
+            # keeps running): restarting = undoing every move.
+            while self.game.undo():
+                pass
+            self.note("Back to the start of the deal. The clock keeps running in a battle.")
+            self._after_action()
+            return
         self.abandon()
         app.new_game(replace=True, seed=self.game.seed, draw=self.game.draw,
                      scoring=self.game.scoring, winnable=self.game.winnable)
@@ -1496,6 +1553,11 @@ class GameScreen(Screen):
     def action_help(self) -> None:
         self.app.push_screen(TextPage("Help", HELP_TEXT))
 
+    def action_review(self) -> None:
+        g = self.game
+        self.app.push_screen(review_page({"seed": g.seed, "draw": g.draw, "scoring": g.scoring,
+                                          "log": list(g.log), "won": g.is_won()}))
+
     def action_quit_app(self) -> None:
         if not self.game.is_won():
             self._save()
@@ -1515,6 +1577,7 @@ MENU_INFO = {
     "whatsnew": "What changed in recent updates.",
     "help": "Rules, mouse and keys, scoring.",
     "stats": "Wins, streaks, best times.",
+    "review": "Every move of your last game, and where it was lost.",
     "quit": "See you next time.",
 }
 
@@ -1552,6 +1615,7 @@ class MenuScreen(Screen):
                      index=0 if settings.get("timer", True) else 1),
             MenuItem("whatsnew", "What's new"),
             MenuItem("help", "Help"),
+            MenuItem("review", "Review last game"),
             MenuItem("stats", "Statistics"),
             MenuItem("quit", "Quit"),
         ]
@@ -1595,6 +1659,7 @@ class MenuScreen(Screen):
         menu = self.query_one(AsciiMenu)
         snap = load_game_snapshot()
         menu.set_visible("continue", bool(snap and snap.get("game")))
+        menu.set_visible("review", bool(load_game_logs()))
         self._update_info()
 
     def say(self, text: str) -> None:
@@ -1653,6 +1718,10 @@ class MenuScreen(Screen):
             self.action_help()
         elif event.item_id == "stats":
             app.push_screen(TextPage("Statistics", "\n".join(stats_summary())))
+        elif event.item_id == "review":
+            logs = load_game_logs()
+            if logs:
+                app.push_screen(review_page(logs[-1]))
         elif event.item_id == "quit":
             app.exit()
 
@@ -1743,9 +1812,13 @@ class SolitaireApp(App):
 
     def on_mount(self) -> None:
         self.push_screen(MenuScreen())
-        if self.initial:
-            self.new_game(seed=self.initial.get("seed"), draw=self.initial.get("draw"),
-                          scoring=self.initial.get("scoring"))
+        if self.initial and self.initial.get("battle"):
+            if not self._resume_same_deal():
+                self._battle_deal(int(self.initial["battle"]))
+        elif self.initial:
+            if not self._resume_same_deal():
+                self.new_game(seed=self.initial.get("seed"), draw=self.initial.get("draw"),
+                              scoring=self.initial.get("scoring"))
         elif self.resume:
             self.continue_game()
         self._whats_new()
@@ -1754,6 +1827,29 @@ class SolitaireApp(App):
         self.top_up_pool()
 
     # -- games -----------------------------------------------------------
+    def _resume_same_deal(self) -> bool:
+        """`--deal N` while a saved game of that same deal is waiting (a chat
+        battle reopened, a restarted terminal): carry on with it instead of
+        starting over and counting the saved one as a loss."""
+        init = self.initial or {}
+        snap = (load_game_snapshot() or {}).get("game") or {}
+        if init.get("battle"):
+            return snap.get("battle") == init["battle"] and self.continue_game()
+        if init.get("seed") is None or snap.get("seed") != init.get("seed"):
+            return False
+        if int(snap.get("draw", 1)) != int(init.get("draw") or 1):
+            return False
+        if init.get("scoring") and snap.get("scoring") != init.get("scoring"):
+            return False
+        return self.continue_game()
+
+    @work(thread=True, exclusive=True, group="deal")
+    def _battle_deal(self, battle: int) -> None:
+        from ..solver import battle_seed
+
+        seed = battle_seed(battle, 1)
+        self.call_from_thread(self._start_deal, seed, 1, "standard", False, True, battle)
+
     def _game_screen(self) -> Optional[GameScreen]:
         return next((s for s in self.screen_stack if isinstance(s, GameScreen)), None)
 
@@ -1770,7 +1866,8 @@ class SolitaireApp(App):
         if game.started and not game.is_won():
             record_game(
                 {"won": False, "draw": game.draw, "scoring": game.scoring, "score": game.score,
-                 "moves": game.moves, "time": int(game.elapsed), "seed": game.seed},
+                 "moves": game.moves, "time": int(game.elapsed), "seed": game.seed,
+                 **({"battle": game.battle} if game.battle else {})},
                 bankroll_after=game.bankroll if game.scoring == "vegas_cumulative" else None,
                 log=game.log,
             )
@@ -1819,11 +1916,12 @@ class SolitaireApp(App):
         self._start_deal(seed, draw, scoring, replace, winnable=seed is not None)
 
     def _start_deal(self, seed: Optional[int], draw: int, scoring: str, replace: bool,
-                    winnable: bool) -> None:
+                    winnable: bool, battle: Optional[int] = None) -> None:
         self._abandon_saved()
         game = Klondike(seed=seed, draw=draw, scoring=scoring,
                         bankroll=bankroll() if scoring == "vegas_cumulative" else 0)
         game.winnable = winnable
+        game.battle = battle
         screen = GameScreen(game)
         if replace and isinstance(self.screen, GameScreen):
             self.switch_screen(screen)

@@ -306,6 +306,18 @@ def is_winnable(seed: int, draw: int = 1, scoring: str = "standard", node_limit:
     return Solver(Klondike(seed=seed, draw=draw, scoring=scoring), node_limit).solve()
 
 
+def battle_seed(battle: int, draw: int = 1) -> int:
+    """The deal for a chat battle: the first winnable deal from a starting
+    number derived from the battle id. Deterministic, so every player of
+    the battle computes the same deal on their own."""
+    seed = (int(battle) * 7919) % 999_999 + 1
+    for _ in range(500):
+        if is_winnable(seed, draw, "standard"):
+            return seed
+        seed = seed % 999_999 + 1
+    return (int(battle) * 7919) % 999_999 + 1
+
+
 def find_winnable_seed(
     draw: int = 1,
     scoring: str = "standard",
