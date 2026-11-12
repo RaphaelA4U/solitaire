@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.7.0 (2026-11-12)
+- `solitaire --verify` reads one game record (a `games.jsonl` line) on stdin, replays it from its seed with the game's own rules and prints one JSON line saying whether its win, score, moves and time hold up. It writes no files and never goes online.
+
 ## v1.6.0 (2026-11-12)
 - `--seed N` works like `--deal N` (the same flag in every game), and the game log records the version.
 

@@ -100,6 +100,7 @@ solitaire --scoring vegas       standard | vegas | vegas_cumulative | none
 solitaire --resume              reopen the saved game
 solitaire --battle ID           a beheer chat battle: the same winnable deal for everyone
 solitaire --profile NAME        separate settings, stats, and save
+solitaire --verify < record     replay one games.jsonl line and print the verdict as JSON
 ```
 
 Settings, statistics, and the saved game live in `~/.config/solitaire/`.

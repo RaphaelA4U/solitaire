@@ -35,7 +35,19 @@ def main() -> None:
         "--battle", type=int, metavar="ID",
         help="play chat battle ID (from beheer): everyone gets the same winnable deal",
     )
+    parser.add_argument(
+        "--verify", action="store_true",
+        help="read one games.jsonl record on stdin, replay it and print the verdict as JSON",
+    )
     args = parser.parse_args()
+
+    if args.verify:
+        # Before anything else: no profile, no update check, no settings, no
+        # UI. Not even a .pyc file is written on this path.
+        sys.dont_write_bytecode = True
+        from .verify import run as run_verify
+
+        sys.exit(run_verify())
 
     if args.profile:
         os.environ["SOLITAIRE_PROFILE"] = args.profile
