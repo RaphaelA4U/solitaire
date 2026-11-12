@@ -141,7 +141,10 @@ def record_game(entry: dict[str, Any], bankroll_after: int | None = None,
         try:
             GAMES_FILE.parent.mkdir(parents=True, exist_ok=True)
             with GAMES_FILE.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(dict(entry, date=date, log=list(log)), ensure_ascii=False) + "\n")
+                from . import __version__
+
+                fh.write(json.dumps(dict(entry, date=date, version=__version__, log=list(log)),
+                                    ensure_ascii=False) + "\n")
         except OSError:
             pass
 

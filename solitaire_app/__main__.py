@@ -28,7 +28,7 @@ def main() -> None:
         help="standard | vegas | vegas_cumulative | none",
     )
     parser.add_argument(
-        "--deal", type=int, metavar="N",
+        "--deal", "--seed", type=int, metavar="N", dest="deal",
         help="play deal number N (1-999999); the same number is the same deal",
     )
     parser.add_argument(

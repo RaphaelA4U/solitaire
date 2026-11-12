@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.6.0 (2026-11-12)
+- `--seed N` works like `--deal N` (the same flag in every game), and the game log records the version.
+
 ## v1.5.1 (2026-11-09)
 - Saved games carry a `progress` count (cards home), so a beheer race reads every race game the same way.
 
