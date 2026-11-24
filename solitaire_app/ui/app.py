@@ -1814,7 +1814,8 @@ class SolitaireApp(App):
         self.push_screen(MenuScreen())
         if self.initial and self.initial.get("battle"):
             if not self._resume_same_deal():
-                self._battle_deal(int(self.initial["battle"]))
+                self._battle_deal(int(self.initial["battle"]), int(self.initial.get("draw") or 1),
+                                  str(self.initial.get("scoring") or "standard"), self.initial.get("seed"))
         elif self.initial:
             if not self._resume_same_deal():
                 self.new_game(seed=self.initial.get("seed"), draw=self.initial.get("draw"),
@@ -1844,11 +1845,15 @@ class SolitaireApp(App):
         return self.continue_game()
 
     @work(thread=True, exclusive=True, group="deal")
-    def _battle_deal(self, battle: int) -> None:
-        from ..solver import battle_seed
+    def _battle_deal(self, battle: int, draw: int = 1, scoring: str = "standard",
+                     seed: Optional[int] = None) -> None:
+        from ..solver import battle_seed, is_winnable
 
-        seed = battle_seed(battle, 1)
-        self.call_from_thread(self._start_deal, seed, 1, "standard", False, True, battle)
+        if seed is None:
+            seed, winnable = battle_seed(battle, draw), True
+        else:  # a deal number chosen in beheer: play it as it is
+            winnable = is_winnable(seed, draw, scoring)
+        self.call_from_thread(self._start_deal, seed, draw, scoring, False, winnable, battle)
 
     def _game_screen(self) -> Optional[GameScreen]:
         return next((s for s in self.screen_stack if isinstance(s, GameScreen)), None)

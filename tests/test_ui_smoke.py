@@ -437,3 +437,16 @@ async def test_battle_deal_is_shared_winnable_and_resumes():
                 break
     entry = config.load_stats()["games"][-1]
     assert entry["battle"] == 12 and entry["won"] is False
+
+
+@pytest.mark.asyncio
+async def test_battle_uses_the_settings_and_deal_from_beheer():
+    # beheer starts a race with chosen settings: draw 3, vegas, deal 4242. Every player gets that game.
+    app = SolitaireApp(no_update=True, initial={"draw": 3, "scoring": "vegas", "seed": 4242, "battle": 31})
+    async with app.run_test(size=SIZE) as pilot:
+        for _ in range(400):
+            await pilot.pause(0.05)
+            if isinstance(app.screen, GameScreen):
+                break
+        g = app.screen.game
+        assert (g.seed, g.draw, g.scoring, g.battle) == (4242, 3, "vegas", 31)

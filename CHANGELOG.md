@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.7.1 (2026-11-24)
+- A chat battle from BM Beheer now plays the draw, scoring and (optional) deal number its starter picked (`--battle ID --draw 3 --scoring vegas --seed N`). Without a deal number every player still gets the same winnable deal from the battle id.
+
 ## v1.7.0 (2026-11-12)
 - `solitaire --verify` reads one game record (a `games.jsonl` line) on stdin, replays it from its seed with the game's own rules and prints one JSON line saying whether its win, score, moves and time hold up. It writes no files and never goes online.
 

@@ -78,7 +78,10 @@ def main() -> None:
 
     initial = None
     if args.battle is not None:
-        initial = {"draw": 1, "scoring": "standard", "seed": None, "battle": args.battle}
+        # The battle's settings come from beheer (the same for every player);
+        # without a deal number every player derives the same winnable deal.
+        initial = {"draw": args.draw or 1, "scoring": args.scoring or "standard", "seed": args.deal,
+                   "battle": args.battle}
     elif args.new or args.draw or args.scoring or args.deal is not None:
         from .config import load_settings
 

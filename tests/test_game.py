@@ -261,3 +261,19 @@ def test_save_carries_race_progress():
     assert g.to_dict()["progress"] == 0
     g.piles["f0"] = [g.piles["t0"].pop()]
     assert g.to_dict()["progress"] == 1
+
+
+def test_battle_cli_takes_the_settings_from_beheer(monkeypatch):
+    # beheer starts a race as `solitaire --battle 7 --draw 3 --scoring vegas --seed 4242`.
+    import sys
+
+    import solitaire_app.__main__ as cli
+    import solitaire_app.ui.app as ui
+
+    seen = []
+    monkeypatch.setattr(ui, "run", lambda **kw: seen.append(kw["initial"]))
+    for argv in (["--battle", "7", "--draw", "3", "--scoring", "vegas", "--seed", "4242"], ["--battle", "7"]):
+        monkeypatch.setattr(sys, "argv", ["solitaire", "--no-update", *argv])
+        cli.main()
+    assert seen[0] == {"draw": 3, "scoring": "vegas", "seed": 4242, "battle": 7}
+    assert seen[1] == {"draw": 1, "scoring": "standard", "seed": None, "battle": 7}
